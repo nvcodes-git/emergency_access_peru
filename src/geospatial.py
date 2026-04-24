@@ -77,3 +77,123 @@ def build_district_layer(
     print(f"  District layer built: {len(layer)} districts")
     print(f"  Districts with 0 facilities: {(layer['n_ipress'] == 0).sum()}")
     return layer
+
+
+# --- Map outputs (Task 5) ---
+
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+import folium
+from pathlib import Path
+
+FIGURES = Path("output/figures")
+
+
+def plot_static_choropleth(metrics: gpd.GeoDataFrame) -> plt.Figure:
+    """Side-by-side static choropleth: V1 (linear) vs V2 (log-normalized).
+
+    Lets the viewer compare how normalization choice changes the geographic
+    picture of inequality — not just a score table but a spatial story.
+    """
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(18, 10))
+
+    metrics.plot(column="access_score_v1", cmap="RdYlGn", legend=True,
+                 legend_kwds={"label": "Access Score V1", "shrink": 0.6},
+                 missing_kwds={"color": "lightgrey"}, ax=ax1, linewidth=0.1, edgecolor="white")
+    ax1.set_title("V1 — Linear Normalization\n(Large urban districts dominate)", fontweight="bold")
+    ax1.axis("off")
+
+    metrics.plot(column="access_score_v2", cmap="RdYlGn", legend=True,
+                 legend_kwds={"label": "Access Score V2", "shrink": 0.6},
+                 missing_kwds={"color": "lightgrey"}, ax=ax2, linewidth=0.1, edgecolor="white")
+    ax2.set_title("V2 — Log Normalization\n(Relative differences more visible)", fontweight="bold")
+    ax2.axis("off")
+
+    fig.suptitle("Emergency Healthcare Access by District — Peru 2025",
+                 fontsize=15, fontweight="bold")
+    plt.tight_layout()
+    fig.savefig(FIGURES / "choropleth_v1_vs_v2.png", dpi=150, bbox_inches="tight")
+    print("  Saved choropleth_v1_vs_v2.png")
+    return fig
+
+
+def plot_zero_facilities_map(metrics: gpd.GeoDataFrame) -> plt.Figure:
+    """Static map highlighting districts with zero health facilities.
+
+    A binary map is more impactful than a choropleth here — the absence
+    of any facility is a categorical problem, not a gradual one.
+    """
+    metrics = metrics.copy()
+    metrics["has_facility"] = metrics["n_ipress"] > 0
+
+    fig, ax = plt.subplots(figsize=(10, 12))
+    metrics[metrics["has_facility"]].plot(color="#2ecc71", ax=ax, linewidth=0.1,
+                                          edgecolor="white", label="Has facilities")
+    metrics[~metrics["has_facility"]].plot(color="#e74c3c", ax=ax, linewidth=0.1,
+                                           edgecolor="white", label="No facilities")
+
+    green = mpatches.Patch(color="#2ecc71", label=f"Has facilities ({metrics['has_facility'].sum()})")
+    red = mpatches.Patch(color="#e74c3c", label=f"No facilities ({(~metrics['has_facility']).sum()})")
+    ax.legend(handles=[green, red], loc="lower left", fontsize=11)
+    ax.set_title("Districts with No Emergency Health Facilities — Peru 2025",
+                 fontsize=13, fontweight="bold")
+    ax.axis("off")
+    plt.tight_layout()
+    fig.savefig(FIGURES / "zero_facilities_map.png", dpi=150, bbox_inches="tight")
+    print("  Saved zero_facilities_map.png")
+    return fig
+
+
+def build_folium_choropleth(metrics: gpd.GeoDataFrame, column: str = "access_score_v1") -> folium.Map:
+    """Interactive Folium choropleth with per-district tooltips.
+
+    Allows exploration by hovering — users can identify specific districts,
+    see their score, facility count, and emergency activity.
+    """
+    m = folium.Map(location=[-9.19, -75.0], zoom_start=5, tiles="CartoDB positron")
+
+    choropleth = folium.Choropleth(
+        geo_data=metrics[["ubigeo", "geometry"]].to_json(),
+        data=metrics[["ubigeo", column]],
+        columns=["ubigeo", column],
+        key_on="feature.properties.ubigeo",
+        fill_color="RdYlGn",
+        fill_opacity=0.75,
+        line_opacity=0.2,
+        legend_name=f"Access Score ({column})",
+        name="Access Score",
+    )
+    choropleth.add_to(m)
+
+    tooltip_cols = ["ubigeo", "distrito", "departamento", "n_ipress",
+                    "n_centros", "access_score_v1", "access_score_v2"]
+    tooltip_data = metrics[tooltip_cols].copy()
+    tooltip_data["access_score_v1"] = tooltip_data["access_score_v1"].round(3)
+    tooltip_data["access_score_v2"] = tooltip_data["access_score_v2"].round(3)
+
+    for _, row in tooltip_data.iterrows():
+        folium.GeoJson(
+            metrics[metrics["ubigeo"] == row["ubigeo"]][["geometry"]].to_json(),
+            style_function=lambda x: {"fillOpacity": 0, "weight": 0},
+            tooltip=folium.Tooltip(
+                f"<b>{row['distrito']}</b> ({row['departamento']})<br>"
+                f"Facilities: {row['n_ipress']}<br>"
+                f"Populated centers: {row['n_centros']}<br>"
+                f"Score V1: {row['access_score_v1']}<br>"
+                f"Score V2: {row['access_score_v2']}"
+            ),
+        ).add_to(m)
+
+    m.save(str(FIGURES / f"map_{column}.html"))
+    print(f"  Saved map_{column}.html")
+    return m
+
+
+def generate_all_maps(metrics: gpd.GeoDataFrame) -> dict:
+    print("Generating geospatial outputs...")
+    return {
+        "choropleth": plot_static_choropleth(metrics),
+        "zero_facilities": plot_zero_facilities_map(metrics),
+        "folium_v1": build_folium_choropleth(metrics, "access_score_v1"),
+        "folium_v2": build_folium_choropleth(metrics, "access_score_v2"),
+    }
