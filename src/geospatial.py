@@ -147,12 +147,12 @@ def plot_zero_facilities_map(metrics: gpd.GeoDataFrame) -> plt.Figure:
 def build_folium_choropleth(metrics: gpd.GeoDataFrame, column: str = "access_score_v1") -> folium.Map:
     """Interactive Folium choropleth with per-district tooltips.
 
-    Allows exploration by hovering — users can identify specific districts,
-    see their score, facility count, and emergency activity.
+    Uses GeoJsonTooltip (single layer) instead of per-row GeoJson objects
+    for performance with 1873 districts.
     """
     m = folium.Map(location=[-9.19, -75.0], zoom_start=5, tiles="CartoDB positron")
 
-    choropleth = folium.Choropleth(
+    folium.Choropleth(
         geo_data=metrics[["ubigeo", "geometry"]].to_json(),
         data=metrics[["ubigeo", column]],
         columns=["ubigeo", column],
@@ -161,28 +161,23 @@ def build_folium_choropleth(metrics: gpd.GeoDataFrame, column: str = "access_sco
         fill_opacity=0.75,
         line_opacity=0.2,
         legend_name=f"Access Score ({column})",
-        name="Access Score",
-    )
-    choropleth.add_to(m)
+    ).add_to(m)
 
-    tooltip_cols = ["ubigeo", "distrito", "departamento", "n_ipress",
-                    "n_centros", "access_score_v1", "access_score_v2"]
-    tooltip_data = metrics[tooltip_cols].copy()
-    tooltip_data["access_score_v1"] = tooltip_data["access_score_v1"].round(3)
-    tooltip_data["access_score_v2"] = tooltip_data["access_score_v2"].round(3)
+    tooltip_gdf = metrics[["ubigeo", "distrito", "departamento", "n_ipress",
+                            "n_centros", "access_score_v1", "access_score_v2", "geometry"]].copy()
+    tooltip_gdf["access_score_v1"] = tooltip_gdf["access_score_v1"].round(3)
+    tooltip_gdf["access_score_v2"] = tooltip_gdf["access_score_v2"].round(3)
 
-    for _, row in tooltip_data.iterrows():
-        folium.GeoJson(
-            metrics[metrics["ubigeo"] == row["ubigeo"]][["geometry"]].to_json(),
-            style_function=lambda x: {"fillOpacity": 0, "weight": 0},
-            tooltip=folium.Tooltip(
-                f"<b>{row['distrito']}</b> ({row['departamento']})<br>"
-                f"Facilities: {row['n_ipress']}<br>"
-                f"Populated centers: {row['n_centros']}<br>"
-                f"Score V1: {row['access_score_v1']}<br>"
-                f"Score V2: {row['access_score_v2']}"
-            ),
-        ).add_to(m)
+    folium.GeoJson(
+        tooltip_gdf.to_json(),
+        style_function=lambda x: {"fillOpacity": 0, "weight": 0},
+        tooltip=folium.GeoJsonTooltip(
+            fields=["distrito", "departamento", "n_ipress", "n_centros",
+                    "access_score_v1", "access_score_v2"],
+            aliases=["District", "Department", "Facilities", "Populated Centers",
+                     "Score V1", "Score V2"],
+        ),
+    ).add_to(m)
 
     m.save(str(FIGURES / f"map_{column}.html"))
     print(f"  Saved map_{column}.html")
