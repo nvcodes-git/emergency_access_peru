@@ -124,8 +124,51 @@ def plot_score_comparison(metrics: gpd.GeoDataFrame) -> plt.Figure:
     return fig
 
 
+def save_tables(metrics: gpd.GeoDataFrame) -> None:
+    tables_dir = Path("output/tables")
+    tables_dir.mkdir(parents=True, exist_ok=True)
+
+    cols = ["ubigeo", "distrito", "departamento", "n_ipress", "n_centros",
+            "total_atendidos", "access_score_v1", "access_score_v2", "score_diff"]
+    available = [c for c in cols if c in metrics.columns]
+    df = metrics[available].copy()
+    df["access_score_v1"] = df["access_score_v1"].round(4)
+    df["access_score_v2"] = df["access_score_v2"].round(4)
+    df["score_diff"] = df["score_diff"].round(4)
+
+    ranked = df.sort_values("access_score_v1", ascending=False).reset_index(drop=True)
+    ranked.index += 1
+    ranked.index.name = "rank_v1"
+    ranked.to_csv(tables_dir / "district_rankings.csv")
+    print(f"  Saved district_rankings.csv ({len(ranked)} rows)")
+
+    zero = df[df["n_ipress"] == 0].sort_values("departamento")[
+        ["ubigeo", "distrito", "departamento", "n_centros", "access_score_v1", "access_score_v2"]
+    ]
+    zero.to_csv(tables_dir / "zero_facilities.csv", index=False)
+    print(f"  Saved zero_facilities.csv ({len(zero)} districts)")
+
+    dept = (
+        df.groupby("departamento")
+        .agg(
+            n_districts=("distrito", "count"),
+            total_facilities=("n_ipress", "sum"),
+            mean_score_v1=("access_score_v1", "mean"),
+            median_score_v1=("access_score_v1", "median"),
+            min_score_v1=("access_score_v1", "min"),
+            max_score_v1=("access_score_v1", "max"),
+            mean_score_v2=("access_score_v2", "mean"),
+        )
+        .round(4)
+        .sort_values("median_score_v1", ascending=False)
+    )
+    dept.to_csv(tables_dir / "department_summary.csv")
+    print(f"  Saved department_summary.csv ({len(dept)} departments)")
+
+
 def generate_all_figures(metrics: gpd.GeoDataFrame) -> dict:
     print("Generating static figures...")
+    save_tables(metrics)
     return {
         "rankings": plot_top_bottom_districts(metrics),
         "boxplot": plot_department_boxplot(metrics),

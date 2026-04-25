@@ -21,7 +21,8 @@ emergency_access_peru/
 │   ├── raw/                # Original downloaded files (not pushed)
 │   └── processed/          # Cleaned outputs (not pushed)
 ├── output/
-│   └── figures/            # Saved charts and static maps
+│   ├── figures/            # Saved charts and static maps
+│   └── tables/             # Final district-level tables (CSV)
 └── video/
     └── link.txt
 ```
@@ -35,18 +36,28 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-Before running the app for the first time, generate the processed data and figures:
+Before running the app for the first time, generate the processed data and figures by running this in a Python shell from the project root:
 
 ```python
-from src.data_loader import *
-from src.cleaning import *
-from src.geospatial import *
+from src.data_loader import load_centros_poblados, load_distritos, load_emergencias, load_ipress
+from src.cleaning import clean_centros_poblados, clean_distritos, clean_emergencias, clean_ipress
+from src.geospatial import load_ipress_gdf, load_centros_gdf, load_distritos_gdf, build_district_layer, generate_all_maps
 from src.metrics import build_full_metrics
 from src.visualization import generate_all_figures
 
+# Step 1: Clean raw data → saves to data/processed/
+clean_centros_poblados(load_centros_poblados())
+clean_distritos(load_distritos())
+clean_emergencias(load_emergencias())
+clean_ipress(load_ipress())
+
+# Step 2: Spatial joins + metrics
 layer = build_district_layer(load_ipress_gdf(), load_centros_gdf(), load_distritos_gdf())
 metrics = build_full_metrics(layer)
+
+# Step 3: Figures, tables, and maps
 generate_all_figures(metrics)
+generate_all_maps(metrics)
 ```
 
 ---
